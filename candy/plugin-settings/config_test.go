@@ -318,3 +318,36 @@ func TestBindAddress_EnvOverridesConfig(t *testing.T) {
 		t.Errorf("BindAddress = %q, want %q (env should override config)", rt.BindAddress, "0.0.0.0")
 	}
 }
+
+// TestVmImageDir_SetGetReset asserts the configurable VM image root: a valid
+// path round-trips through set/get, an empty value is rejected, and reset
+// clears it. The resolver itself (default "image", env precedence) is covered by
+// TestVmDiskRoot_Configurable in the sdk module.
+func TestVmImageDir_SetGetReset(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	orig := hostenv.RuntimeConfigPath
+	defer func() { hostenv.RuntimeConfigPath = orig }()
+	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
+
+	if err := SetConfigValue(testCtx, nil, "vm.image_dir", "/srv/vm-images"); err != nil {
+		t.Fatalf("set vm.image_dir: %v", err)
+	}
+	val, err := GetConfigValue(testCtx, nil, "vm.image_dir")
+	if err != nil || val != "/srv/vm-images" {
+		t.Fatalf("get vm.image_dir = %q err=%v, want /srv/vm-images", val, err)
+	}
+
+	if err := SetConfigValue(testCtx, nil, "vm.image_dir", ""); err == nil {
+		t.Error("expected error for an empty vm.image_dir")
+	}
+
+	if err := ResetConfigValue(testCtx, nil, "vm.image_dir"); err != nil {
+		t.Fatal(err)
+	}
+	val, _ = GetConfigValue(testCtx, nil, "vm.image_dir")
+	if val != "" {
+		t.Errorf("after reset, vm.image_dir = %q, want empty", val)
+	}
+}
