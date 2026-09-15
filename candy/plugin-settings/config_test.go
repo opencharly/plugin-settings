@@ -352,10 +352,10 @@ func TestVmImageDir_SetGetReset(t *testing.T) {
 	}
 }
 
-// TestVmImageDir_ListAndEnv covers the two surfaces the set/get/reset test does not:
-// the `settings list` entry (key present, default "image") and the env precedence the
-// resolver documents (CHARLY_VM_IMAGE_DIR). The resolver itself is covered in the sdk
-// module; this pins THIS plugin's list/surface behavior.
+// TestVmImageDir_ListAndEnv covers the surfaces the set/get/reset test does not: the
+// `settings list` entry (key present, default "image") and (c) the CHARLY_VM_IMAGE_DIR
+// env override winning over EITHER the default OR a config value. The resolver itself is
+// covered in the sdk module; this pins THIS plugin's list/surface behavior.
 func TestVmImageDir_ListAndEnv(t *testing.T) {
 	tmpDir := t.TempDir()
 	configPath := filepath.Join(tmpDir, "config.yml")
@@ -390,6 +390,15 @@ func TestVmImageDir_ListAndEnv(t *testing.T) {
 	for _, v := range vals {
 		if v.Key == "vm.image_dir" && v.Value != "/srv/x" {
 			t.Errorf("vm.image_dir list after set = %q, want /srv/x", v.Value)
+		}
+	}
+
+	// (c) the env override WINS over the config value in the list.
+	t.Setenv("CHARLY_VM_IMAGE_DIR", "/srv/from-env")
+	vals, _ = ListConfigValues()
+	for _, v := range vals {
+		if v.Key == "vm.image_dir" && v.Value != "/srv/from-env" {
+			t.Errorf("vm.image_dir list with env override = %q, want /srv/from-env", v.Value)
 		}
 	}
 }
