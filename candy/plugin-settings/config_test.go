@@ -123,8 +123,8 @@ func TestListConfigValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListConfigValues() error: %v", err)
 	}
-	if len(vals) != 19 {
-		t.Fatalf("expected 19 values, got %d", len(vals))
+	if len(vals) != 20 {
+		t.Fatalf("expected 20 values, got %d", len(vals))
 	}
 
 	// engine.build should come from config
@@ -316,5 +316,89 @@ func TestBindAddress_EnvOverridesConfig(t *testing.T) {
 	}
 	if rt.BindAddress != "0.0.0.0" {
 		t.Errorf("BindAddress = %q, want %q (env should override config)", rt.BindAddress, "0.0.0.0")
+	}
+}
+
+// TestVmImageDir_SetGetReset asserts the configurable VM image root: a valid
+// path round-trips through set/get, an empty value is rejected, and reset
+// clears it. The resolver itself (default "image", env precedence) is covered by
+// TestVmDiskRoot_Configurable in the sdk module.
+func TestVmImageDir_SetGetReset(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	orig := hostenv.RuntimeConfigPath
+	defer func() { hostenv.RuntimeConfigPath = orig }()
+	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
+
+	if err := SetConfigValue(testCtx, nil, "vm.image_dir", "/srv/vm-images"); err != nil {
+		t.Fatalf("set vm.image_dir: %v", err)
+	}
+	val, err := GetConfigValue(testCtx, nil, "vm.image_dir")
+	if err != nil || val != "/srv/vm-images" {
+		t.Fatalf("get vm.image_dir = %q err=%v, want /srv/vm-images", val, err)
+	}
+
+	if err := SetConfigValue(testCtx, nil, "vm.image_dir", ""); err == nil {
+		t.Error("expected error for an empty vm.image_dir")
+	}
+
+	if err := ResetConfigValue(testCtx, nil, "vm.image_dir"); err != nil {
+		t.Fatal(err)
+	}
+	val, _ = GetConfigValue(testCtx, nil, "vm.image_dir")
+	if val != "" {
+		t.Errorf("after reset, vm.image_dir = %q, want empty", val)
+	}
+}
+
+// TestVmImageDir_ListAndEnv covers the surfaces the set/get/reset test does not: the
+// `settings list` entry (key present, default "image") and (c) the CHARLY_VM_IMAGE_DIR
+// env override winning over EITHER the default OR a config value. The resolver itself is
+// covered in the sdk module; this pins THIS plugin's list/surface behavior.
+func TestVmImageDir_ListAndEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	orig := hostenv.RuntimeConfigPath
+	defer func() { hostenv.RuntimeConfigPath = orig }()
+	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
+
+	// (a) list carries vm.image_dir with the default "image".
+	vals, err := ListConfigValues()
+	if err != nil {
+		t.Fatalf("ListConfigValues: %v", err)
+	}
+	found := false
+	for _, v := range vals {
+		if v.Key == "vm.image_dir" {
+			found = true
+			if v.Value != "image" {
+				t.Errorf("vm.image_dir default in list = %q, want image", v.Value)
+			}
+		}
+	}
+	if !found {
+		t.Error("vm.image_dir missing from ListConfigValues")
+	}
+
+	// (b) an authored config value is reflected in list.
+	if err := SetConfigValue(testCtx, nil, "vm.image_dir", "/srv/x"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	vals, _ = ListConfigValues()
+	for _, v := range vals {
+		if v.Key == "vm.image_dir" && v.Value != "/srv/x" {
+			t.Errorf("vm.image_dir list after set = %q, want /srv/x", v.Value)
+		}
+	}
+
+	// (c) the env override WINS over the config value in the list.
+	t.Setenv("CHARLY_VM_IMAGE_DIR", "/srv/from-env")
+	vals, _ = ListConfigValues()
+	for _, v := range vals {
+		if v.Key == "vm.image_dir" && v.Value != "/srv/from-env" {
+			t.Errorf("vm.image_dir list with env override = %q, want /srv/from-env", v.Value)
+		}
 	}
 }

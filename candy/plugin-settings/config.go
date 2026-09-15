@@ -195,6 +195,8 @@ func GetConfigValue(ctx context.Context, exec *sdk.Executor, key string) (string
 		return cfg.Vm.RootSize, nil
 	case "vm.transport":
 		return cfg.Vm.Transport, nil
+	case "vm.image_dir":
+		return cfg.Vm.ImageDir, nil
 	default:
 		if after, ok := strings.CutPrefix(key, "hosts."); ok {
 			alias := after
@@ -220,7 +222,7 @@ func GetConfigValue(ctx context.Context, exec *sdk.Executor, key string) (string
 			}
 			return val, nil
 		}
-		return "", fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, volumes_path, secret_backend, keyring_collection_label, forward_gpg_agent, forward_ssh_agent, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vnc.password.<image>)", key)
+		return "", fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, volumes_path, secret_backend, keyring_collection_label, forward_gpg_agent, forward_ssh_agent, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
 	}
 }
 
@@ -295,6 +297,10 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 		if !valid[value] {
 			return fmt.Errorf("vm.transport must be \"registry\", \"containers-storage\", \"oci\", or \"oci-archive\", got %q", value)
 		}
+	case "vm.image_dir":
+		if value == "" {
+			return fmt.Errorf("vm.image_dir must be a non-empty directory path")
+		}
 	default:
 		if strings.HasPrefix(key, "hosts.") {
 			// hosts.<alias> — free-form SSH target; no validation
@@ -305,7 +311,7 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 			// VNC passwords are free-form strings, no validation needed.
 			break
 		}
-		return fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vnc.password.<image>)", key)
+		return fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
 	}
 
 	cfg, err := kit.LoadRuntimeConfig()
@@ -358,6 +364,8 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 		cfg.Vm.Rootfs = value
 	case "vm.transport":
 		cfg.Vm.Transport = value
+	case "vm.image_dir":
+		cfg.Vm.ImageDir = value
 	default:
 		if after, ok := strings.CutPrefix(key, "hosts."); ok {
 			alias := after
@@ -433,6 +441,8 @@ func ResetConfigValue(ctx context.Context, exec *sdk.Executor, key string) error
 		cfg.Vm.RootSize = ""
 	case "vm.transport":
 		cfg.Vm.Transport = ""
+	case "vm.image_dir":
+		cfg.Vm.ImageDir = ""
 	default:
 		if after, ok := strings.CutPrefix(key, "hosts."); ok {
 			alias := after
@@ -446,7 +456,7 @@ func ResetConfigValue(ctx context.Context, exec *sdk.Executor, key string) error
 			name := after
 			return credentialDelete(ctx, exec, credServiceVNC, name)
 		}
-		return fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vnc.password.<image>)", key)
+		return fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
 	}
 
 	return kit.SaveRuntimeConfig(cfg)
@@ -571,6 +581,7 @@ func ListConfigValues() ([]configKeySource, error) {
 		vmCpusEntry(),
 		resolve("vm.rootfs", "CHARLY_VM_ROOTFS", cfg.Vm.Rootfs, "ext4"),
 		resolve("vm.transport", "CHARLY_VM_TRANSPORT", cfg.Vm.Transport, ""),
+		resolve("vm.image_dir", "CHARLY_VM_IMAGE_DIR", cfg.Vm.ImageDir, "image"),
 	}
 	// Append host aliases (dynamic keys — one per map entry).
 	for name, target := range cfg.HostAliases {
