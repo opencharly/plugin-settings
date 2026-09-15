@@ -123,8 +123,8 @@ func TestListConfigValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListConfigValues() error: %v", err)
 	}
-	if len(vals) != 19 {
-		t.Fatalf("expected 19 values, got %d", len(vals))
+	if len(vals) != 20 {
+		t.Fatalf("expected 20 values, got %d", len(vals))
 	}
 
 	// engine.build should come from config
@@ -349,5 +349,47 @@ func TestVmImageDir_SetGetReset(t *testing.T) {
 	val, _ = GetConfigValue(testCtx, nil, "vm.image_dir")
 	if val != "" {
 		t.Errorf("after reset, vm.image_dir = %q, want empty", val)
+	}
+}
+
+// TestVmImageDir_ListAndEnv covers the two surfaces the set/get/reset test does not:
+// the `settings list` entry (key present, default "image") and the env precedence the
+// resolver documents (CHARLY_VM_IMAGE_DIR). The resolver itself is covered in the sdk
+// module; this pins THIS plugin's list/surface behavior.
+func TestVmImageDir_ListAndEnv(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yml")
+
+	orig := hostenv.RuntimeConfigPath
+	defer func() { hostenv.RuntimeConfigPath = orig }()
+	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
+
+	// (a) list carries vm.image_dir with the default "image".
+	vals, err := ListConfigValues()
+	if err != nil {
+		t.Fatalf("ListConfigValues: %v", err)
+	}
+	found := false
+	for _, v := range vals {
+		if v.Key == "vm.image_dir" {
+			found = true
+			if v.Value != "image" {
+				t.Errorf("vm.image_dir default in list = %q, want image", v.Value)
+			}
+		}
+	}
+	if !found {
+		t.Error("vm.image_dir missing from ListConfigValues")
+	}
+
+	// (b) an authored config value is reflected in list.
+	if err := SetConfigValue(testCtx, nil, "vm.image_dir", "/srv/x"); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	vals, _ = ListConfigValues()
+	for _, v := range vals {
+		if v.Key == "vm.image_dir" && v.Value != "/srv/x" {
+			t.Errorf("vm.image_dir list after set = %q, want /srv/x", v.Value)
+		}
 	}
 }
