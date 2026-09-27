@@ -19,6 +19,7 @@
 package settings
 
 import (
+	"embed"
 	"fmt"
 	"os"
 
@@ -26,16 +27,20 @@ import (
 	pb "github.com/opencharly/spec/proto"
 )
 
+//go:embed schema/*.cue
+var schemaFS embed.FS
+
 // NewProvider returns the settings provider.
 func NewProvider() pb.ProviderServer { return &provider{} }
 
 // NewMeta advertises command:settings — the COMPILED-IN registry path resolves it
 // (registerCompiledPlugin → resolve(ClassCommand,"settings") → dispatchInProcCommand → Invoke(OpRun)
-// with the threaded in-proc reverse channel) — plus the self-contained doc schema, via sdk.NewMeta.
+// with the threaded in-proc reverse channel) — plus this plugin's OWN self-contained doc schema
+// (schema/settings.cue) served over Describe, via sdk.NewMeta: there is NO schema-less plugin.
 func NewMeta() pb.PluginMetaServer {
 	return sdk.NewMeta("2026.181.0001",
 		[]sdk.ProvidedCapability{{Class: "command", Word: "settings"}},
-		nil)
+		schemaFS)
 }
 
 // CliMain is the out-of-process CLI entrypoint (only reached when settings is NOT compiled in).
