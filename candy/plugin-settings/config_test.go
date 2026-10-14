@@ -26,7 +26,7 @@ func TestSetConfigValue_Validates(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	err := SetConfigValue(testCtx, nil, "engine.build", "containerd")
+	err := SetConfigValue(testCtx, nil, "engine.run", "containerd")
 	if err == nil {
 		t.Error("expected error for invalid engine value")
 	}
@@ -36,12 +36,12 @@ func TestSetConfigValue_Validates(t *testing.T) {
 		t.Error("expected error for invalid run_mode value")
 	}
 
-	err = SetConfigValue(testCtx, nil, "engine.build", "podman")
+	err = SetConfigValue(testCtx, nil, "engine.run", "podman")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	val, err := GetConfigValue(testCtx, nil, "engine.build")
+	val, err := GetConfigValue(testCtx, nil, "engine.run")
 	if err != nil {
 		t.Fatalf("GetConfigValue() error: %v", err)
 	}
@@ -58,14 +58,14 @@ func TestResetConfigValue(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	if err := SetConfigValue(testCtx, nil, "engine.build", "podman"); err != nil {
+	if err := SetConfigValue(testCtx, nil, "engine.run", "podman"); err != nil {
 		t.Fatal(err)
 	}
-	if err := ResetConfigValue(testCtx, nil, "engine.build"); err != nil {
+	if err := ResetConfigValue(testCtx, nil, "engine.run"); err != nil {
 		t.Fatal(err)
 	}
 
-	val, _ := GetConfigValue(testCtx, nil, "engine.build")
+	val, _ := GetConfigValue(testCtx, nil, "engine.run")
 	if val != "" {
 		t.Errorf("after reset, GetConfigValue() = %q, want empty", val)
 	}
@@ -79,7 +79,7 @@ func TestResetConfigValue_All(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	if err := SetConfigValue(testCtx, nil, "engine.build", "podman"); err != nil {
+	if err := SetConfigValue(testCtx, nil, "engine.run", "podman"); err != nil {
 		t.Fatal(err)
 	}
 	if err := SetConfigValue(testCtx, nil, "run_mode", "quadlet"); err != nil {
@@ -90,7 +90,7 @@ func TestResetConfigValue_All(t *testing.T) {
 	}
 
 	cfg, _ := kit.LoadRuntimeConfig()
-	if cfg.Engine.Build != "" || cfg.RunMode != "" {
+	if cfg.Engine.Run != "" || cfg.RunMode != "" {
 		t.Errorf("after full reset, config should be empty, got %+v", cfg)
 	}
 }
@@ -103,7 +103,6 @@ func TestListConfigValues(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	_ = os.Unsetenv("CHARLY_BUILD_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_MODE")
 	_ = os.Unsetenv("CHARLY_AUTO_ENABLE")
@@ -115,7 +114,7 @@ func TestListConfigValues(t *testing.T) {
 	_ = os.Unsetenv("CHARLY_VM_RAM")
 	_ = os.Unsetenv("CHARLY_VM_CPUS")
 
-	if err := SetConfigValue(testCtx, nil, "engine.build", "podman"); err != nil {
+	if err := SetConfigValue(testCtx, nil, "engine.run", "podman"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,29 +122,26 @@ func TestListConfigValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListConfigValues() error: %v", err)
 	}
-	if len(vals) != 20 {
-		t.Fatalf("expected 20 values, got %d", len(vals))
+	// 19 rows: the retired `engine.build` is no longer among them (its own arms pin that).
+	if len(vals) != 19 {
+		t.Fatalf("expected 19 values, got %d", len(vals))
 	}
 
-	// engine.build should come from config
-	if vals[0].Key != "engine.build" || vals[0].Value != "podman" || vals[0].Source != "config" {
-		t.Errorf("engine.build entry: %+v", vals[0])
-	}
-	// engine.run should be default "auto"
-	if vals[1].Key != "engine.run" || vals[1].Value != "auto" || vals[1].Source != "default" {
-		t.Errorf("engine.run entry: %+v", vals[1])
+	// engine.run is the FIRST row now, and it comes from config
+	if vals[0].Key != "engine.run" || vals[0].Value != "podman" || vals[0].Source != "config" {
+		t.Errorf("engine.run entry: %+v", vals[0])
 	}
 	// engine.rootful should be default "auto"
-	if vals[2].Key != "engine.rootful" || vals[2].Value != "auto" || vals[2].Source != "default" {
-		t.Errorf("engine.rootful entry: %+v", vals[2])
+	if vals[1].Key != "engine.rootful" || vals[1].Value != "auto" || vals[1].Source != "default" {
+		t.Errorf("engine.rootful entry: %+v", vals[1])
 	}
 	// auto_enable should be default true
-	if vals[4].Key != "auto_enable" || vals[4].Value != "true" || vals[4].Source != "default" {
-		t.Errorf("auto_enable entry: %+v", vals[4])
+	if vals[3].Key != "auto_enable" || vals[3].Value != "true" || vals[3].Source != "default" {
+		t.Errorf("auto_enable entry: %+v", vals[3])
 	}
 	// bind_address should be default 127.0.0.1
-	if vals[5].Key != "bind_address" || vals[5].Value != "127.0.0.1" || vals[5].Source != "default" {
-		t.Errorf("bind_address entry: %+v", vals[5])
+	if vals[4].Key != "bind_address" || vals[4].Value != "127.0.0.1" || vals[4].Source != "default" {
+		t.Errorf("bind_address entry: %+v", vals[4])
 	}
 }
 
@@ -223,7 +219,6 @@ func TestAutoEnable_EnvOverridesConfig(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	_ = os.Unsetenv("CHARLY_BUILD_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_MODE")
 	_ = os.Unsetenv("CHARLY_BIND_ADDRESS")
@@ -254,7 +249,6 @@ func TestAutoEnable_ListConfigValues(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	_ = os.Unsetenv("CHARLY_BUILD_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_MODE")
 	_ = os.Unsetenv("CHARLY_AUTO_ENABLE")
@@ -296,7 +290,6 @@ func TestBindAddress_EnvOverridesConfig(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	_ = os.Unsetenv("CHARLY_BUILD_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_ENGINE")
 	_ = os.Unsetenv("CHARLY_RUN_MODE")
 	_ = os.Unsetenv("CHARLY_AUTO_ENABLE")

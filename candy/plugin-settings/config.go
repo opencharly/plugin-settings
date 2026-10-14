@@ -125,19 +125,62 @@ func credentialReset(ctx context.Context, exec *sdk.Executor) {
 	_, _ = credentialCall(ctx, exec, credentialInput{Method: "reset"})
 }
 
+// retiredSetting is ONE setting the CLI no longer serves, with the answer a user who still asks
+// for it needs: WHY it is gone and what — if anything — replaced it.
+//
+// It exists because a shrinking vocabulary is not the same thing as the user's QUESTION going
+// away. A key that once worked and now reports a bare "unknown config key" reads as a typo or a
+// regression, and the user's next move is to re-type it, search the docs, or file a bug — when the
+// truth is a retirement with a named successor. Naming it costs one row and answers all three.
+type retiredSetting struct {
+	// Key is the retired dot-notation key, exactly as it was spelled when it worked.
+	Key string
+	// Why is what removed it, so the answer can be checked against the decision rather than taken
+	// on faith.
+	Why string
+	// Instead is the successor, or an explicit statement that there is none.
+	Instead string
+}
+
+// retiredSettings is the ONE record of retired settings. Adding a retirement is one row here plus
+// the deletion of the key from the vocabulary — never a second code path, and never a silent
+// disappearance.
+func retiredSettings() []retiredSetting {
+	return []retiredSetting{{
+		Key: "engine.build",
+		Why: "the image BUILDER is BuildKit, which is not a container engine: it cannot run a " +
+			"container and therefore cannot be selected like one (opencharly/opencharly#481)",
+		Instead: "there is no successor setting — BuildKit is charly's only image builder. " +
+			"`engine.run` (which engine RUNS containers) is unaffected and still selectable",
+	}}
+}
+
+// retiredSettingError returns the named retirement for key, or nil when the key is not retired. It
+// is called by get/set/reset BEFORE their own dispatch, so a retired key is answered as a
+// RETIREMENT rather than as an unknown key — the one place the answer lives.
+func retiredSettingError(key string) error {
+	for _, r := range retiredSettings() {
+		if r.Key == key {
+			return fmt.Errorf("%s was retired: %s; %s", r.Key, r.Why, r.Instead)
+		}
+	}
+	return nil
+}
+
 // GetConfigValue returns the value for a dot-notation key from the config file. Direct port of
 // charly/runtime_config_values.go's GetConfigValue.
 //
 //nolint:gocyclo // flat dispatch over config keys + dynamic hosts./vnc.password subkeys; uniform getter
 func GetConfigValue(ctx context.Context, exec *sdk.Executor, key string) (string, error) {
+	if rerr := retiredSettingError(key); rerr != nil {
+		return "", rerr
+	}
 	cfg, err := kit.LoadRuntimeConfig()
 	if err != nil {
 		return "", err
 	}
 
 	switch key {
-	case "engine.build":
-		return cfg.Engine.Build, nil
 	case "engine.run":
 		return cfg.Engine.Run, nil
 	case "engine.rootful":
@@ -222,7 +265,7 @@ func GetConfigValue(ctx context.Context, exec *sdk.Executor, key string) (string
 			}
 			return val, nil
 		}
-		return "", fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, volumes_path, secret_backend, keyring_collection_label, forward_gpg_agent, forward_ssh_agent, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
+		return "", fmt.Errorf("unknown config key %q (valid: engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, volumes_path, secret_backend, keyring_collection_label, forward_gpg_agent, forward_ssh_agent, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
 	}
 }
 
@@ -231,9 +274,12 @@ func GetConfigValue(ctx context.Context, exec *sdk.Executor, key string) (string
 //
 //nolint:gocyclo // paired validate+persist switch over ~25 config keys; per-key logic is cohesive
 func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) error {
+	if rerr := retiredSettingError(key); rerr != nil {
+		return rerr
+	}
 	// Validate value before writing
 	switch key {
-	case "engine.build", "engine.run":
+	case "engine.run":
 		if value != "auto" {
 			if err := kit.ValidateEngine(value, key); err != nil {
 				return fmt.Errorf("%s must be \"auto\", \"docker\", or \"podman\", got %q", key, value)
@@ -311,7 +357,7 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 			// VNC passwords are free-form strings, no validation needed.
 			break
 		}
-		return fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
+		return fmt.Errorf("unknown config key %q (valid: engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
 	}
 
 	cfg, err := kit.LoadRuntimeConfig()
@@ -320,8 +366,6 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 	}
 
 	switch key {
-	case "engine.build":
-		cfg.Engine.Build = value
 	case "engine.run":
 		cfg.Engine.Run = value
 	case "engine.rootful":
@@ -391,6 +435,9 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 // ResetConfigValue removes a key from the config file (reverts to default). If key is empty,
 // resets the entire config. Direct port of charly/runtime_config_values.go's ResetConfigValue.
 func ResetConfigValue(ctx context.Context, exec *sdk.Executor, key string) error {
+	if rerr := retiredSettingError(key); rerr != nil {
+		return rerr
+	}
 	if key == "" {
 		// Reset entire config
 		return kit.SaveRuntimeConfig(&kit.RuntimeConfig{})
@@ -402,8 +449,6 @@ func ResetConfigValue(ctx context.Context, exec *sdk.Executor, key string) error
 	}
 
 	switch key {
-	case "engine.build":
-		cfg.Engine.Build = ""
 	case "engine.run":
 		cfg.Engine.Run = ""
 	case "engine.rootful":
@@ -456,7 +501,7 @@ func ResetConfigValue(ctx context.Context, exec *sdk.Executor, key string) error
 			name := after
 			return credentialDelete(ctx, exec, credServiceVNC, name)
 		}
-		return fmt.Errorf("unknown config key %q (valid: engine.build, engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
+		return fmt.Errorf("unknown config key %q (valid: engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
 	}
 
 	return kit.SaveRuntimeConfig(cfg)
@@ -562,7 +607,6 @@ func ListConfigValues() ([]configKeySource, error) {
 	}
 
 	out := []configKeySource{
-		resolve("engine.build", "CHARLY_BUILD_ENGINE", cfg.Engine.Build, "auto"),
 		resolve("engine.run", "CHARLY_RUN_ENGINE", cfg.Engine.Run, "auto"),
 		resolve("engine.rootful", "CHARLY_ENGINE_ROOTFUL", cfg.Engine.Rootful, "auto"),
 		resolve("run_mode", "CHARLY_RUN_MODE", cfg.RunMode, "auto"),
@@ -599,15 +643,22 @@ func ListConfigValues() ([]configKeySource, error) {
 // resolve via GetConfigValue; engine.* via kit.ResolveRuntime (shows "podman" not "auto");
 // secret_backend via the resolved credential store name.
 func resolveSettingsGet(ctx context.Context, exec *sdk.Executor, key string) (string, error) {
+	// The retirement check belongs HERE, at the entry point the CLI actually calls, and not only in
+	// GetConfigValue: this function dispatches the `get` grammar itself and reaches the generic
+	// unknown-key error WITHOUT ever delegating, so a retired key answered there would be reported as
+	// a typo. Measured the hard way: the unit arms that called GetConfigValue directly all passed
+	// while the live command still said "unknown config key" — the difference between testing the
+	// FUNCTION and testing the SURFACE.
+	if rerr := retiredSettingError(key); rerr != nil {
+		return "", rerr
+	}
 	if strings.HasPrefix(key, "vnc.password.") {
 		return GetConfigValue(ctx, exec, key)
 	}
 	switch key {
-	case "engine.build", "engine.run", "engine.rootful":
+	case "engine.run", "engine.rootful":
 		if rt, err := kit.ResolveRuntime(); err == nil {
 			switch key {
-			case "engine.build":
-				return rt.BuildEngine, nil
 			case "engine.run":
 				return rt.RunEngine, nil
 			case "engine.rootful":
