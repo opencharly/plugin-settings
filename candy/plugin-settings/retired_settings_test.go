@@ -39,7 +39,11 @@ func TestRetiredSettingAnswersByName(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"get", func() error { _, err := GetConfigValue(testCtx, nil, "engine.build"); return err }},
+		// BOTH paths, because they are different code: GetConfigValue is the function the tests
+		// called while the CLI's own entry point answered the generic unknown-key error — the arm
+		// that would have caught it drives the SURFACE the command drives.
+		{"get (function)", func() error { _, err := GetConfigValue(testCtx, nil, "engine.build"); return err }},
+		{"get (CLI entry point)", func() error { _, err := resolveSettingsGet(testCtx, nil, "engine.build"); return err }},
 		{"set", func() error { return SetConfigValue(testCtx, nil, "engine.build", "podman") }},
 		{"reset", func() error { return ResetConfigValue(testCtx, nil, "engine.build") }},
 	} {

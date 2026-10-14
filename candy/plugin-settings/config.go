@@ -643,6 +643,15 @@ func ListConfigValues() ([]configKeySource, error) {
 // resolve via GetConfigValue; engine.* via kit.ResolveRuntime (shows "podman" not "auto");
 // secret_backend via the resolved credential store name.
 func resolveSettingsGet(ctx context.Context, exec *sdk.Executor, key string) (string, error) {
+	// The retirement check belongs HERE, at the entry point the CLI actually calls, and not only in
+	// GetConfigValue: this function dispatches the `get` grammar itself and reaches the generic
+	// unknown-key error WITHOUT ever delegating, so a retired key answered there would be reported as
+	// a typo. Measured the hard way: the unit arms that called GetConfigValue directly all passed
+	// while the live command still said "unknown config key" — the difference between testing the
+	// FUNCTION and testing the SURFACE.
+	if rerr := retiredSettingError(key); rerr != nil {
+		return "", rerr
+	}
 	if strings.HasPrefix(key, "vnc.password.") {
 		return GetConfigValue(ctx, exec, key)
 	}
