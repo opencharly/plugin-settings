@@ -11,3 +11,104 @@
 discover:
     - path: candy
       recursive: true
+
+# ---------------------------------------------------------------------------
+# THE R10 BED for the `charly settings` command surface.
+#
+# SHAPE (the plugin-clean#15 / plugin-cache#9 precedent): a `kind:local` TEMPLATE that installs
+# nothing (`candy: []` is required there) and carries NO plan — a template's `plan:` is not carried
+# into the composed deploy, so checks declared there silently never run — plus a `disposable: true`
+# DEPLOY that composes it and carries the `plan:`.
+#
+# WHY A BED RATHER THAN ONLY UNIT TESTS, for THIS change: the retirement of `engine.build`
+# (opencharly/opencharly#481 leg 5) is a change to the CLI SURFACE — what `charly settings get/set/
+# reset/list` answers. The unit suite proves the functions; this bed proves the COMMAND a user
+# types, on the real binary, with the answer pasted. `/charly-check:check`'s instrument asks for
+# exactly that where a surface is provable with the binary alone.
+#
+# `${CHARLY_BIN}` is BRACED and named in the step's own evidence: a bare `charly` resolves from the
+# step's PATH and can measure a STALE install (R9), and the runner substitutes the BRACED spelling
+# only. Each step writes its log to a file and asserts on that file, so the step's exit status is
+# its own assertions and not a pipeline's.
+# ---------------------------------------------------------------------------
+settings-cmd-check:
+    local:
+        description: |-
+            Minimal kind:local template for the settings-command bed: installs nothing (`candy: []`
+            is required on a kind:local template) and carries no plan — the checks live on the
+            deploy that composes it.
+        candy: []
+
+check-settings-retired-build:
+    local:
+        from: settings-cmd-check
+        host: local
+        disposable: true
+        lifecycle: test
+        plan:
+            - check: the `charly settings` grammar resolves in the ACTIVE binary
+              id: st-grammar-resolves
+              context: [runtime]
+              timeout: 120s
+              exit_status: 0
+              stdout:
+                contains: SETTINGS-GRAMMAR-OK
+              command:
+                in_container: false
+                command: |
+                    set -eu
+                    echo "the binary under test is ${CHARLY_BIN}"
+                    ${CHARLY_BIN} settings --help >/dev/null
+                    ${CHARLY_BIN} settings list >/dev/null
+                    echo SETTINGS-GRAMMAR-OK
+            - check: >-
+                  the retired `engine.build` is answered BY NAME by get/set/reset, is absent from the
+                  listing while `engine.run` stays, and a leftover entry in config.yml is inert
+              id: st-retired-build-named
+              context: [runtime]
+              timeout: 300s
+              exit_status: 0
+              stdout:
+                contains: SETTINGS-RETIRED-OK
+              command:
+                in_container: false
+                command: |
+                    set -eu
+                    # An isolated config dir, so the bed never touches the operator's own settings.
+                    export XDG_CONFIG_HOME="$(mktemp -d)"
+                    LOG="$PWD/.check/settings-retired-build.log"; mkdir -p "$(dirname "$LOG")"
+                    arms() {
+                    echo "== the binary under test is ${CHARLY_BIN} ($(${CHARLY_BIN} version 2>/dev/null | tail -1))"
+                    echo "== config path: $(${CHARLY_BIN} settings path 2>/dev/null | tail -1)"
+                    echo "== ARM 1: the retired key is answered BY NAME, not as an unknown key"
+                    for verb in get set reset; do
+                      case "$verb" in
+                        get)   ${CHARLY_BIN} settings get engine.build 2>&1 || true ;;
+                        set)   ${CHARLY_BIN} settings set engine.build podman 2>&1 || true ;;
+                        reset) ${CHARLY_BIN} settings reset engine.build 2>&1 || true ;;
+                      esac
+                    done
+                    echo "== ARM 2: the listing advertises engine.run and NOT engine.build"
+                    ${CHARLY_BIN} settings list 2>&1 | grep -E "engine\.(run|build)" || true
+                    echo "== ARM 3: engine.run is untouched — set, read back, reset"
+                    ${CHARLY_BIN} settings set engine.run podman 2>&1
+                    echo "get engine.run -> $(${CHARLY_BIN} settings get engine.run 2>/dev/null | tail -1)"
+                    ${CHARLY_BIN} settings reset engine.run 2>&1
+                    echo "== ARM 4: a leftover engine.build in config.yml is INERT (measured, #481 D-1)"
+                    CFG="$(${CHARLY_BIN} settings path 2>/dev/null | tail -1)"
+                    ${CHARLY_BIN} settings set engine.run docker >/dev/null 2>&1
+                    printf 'engine:\n  build: podman\n' >> "$CFG"
+                    echo "get engine.run with a leftover build key -> $(${CHARLY_BIN} settings get engine.run 2>/dev/null | tail -1)"
+                    echo "== SETTINGS-RETIRED-OK"
+                    }
+                    if arms >"$LOG" 2>&1; then :; else rc=$?; cat "$LOG"; exit $rc; fi
+                    # POSITIVE assertions on the retained log (a step's stdout is not kept by the runner).
+                    grep -q 'engine.build was retired' "$LOG" || { echo "the retirement was not named"; cat "$LOG"; exit 1; }
+                    grep -q 'BuildKit' "$LOG" || { echo "the answer does not name the successor reality"; cat "$LOG"; exit 1; }
+                    if grep -q 'unknown config key' "$LOG"; then echo "a retired key was answered as UNKNOWN"; cat "$LOG"; exit 1; fi
+                    grep -qE '^engine\.run +' "$LOG" || { echo "the listing lost engine.run"; cat "$LOG"; exit 1; }
+                    if grep -qE '^engine\.build +' "$LOG"; then echo "the listing still advertises the retired key"; cat "$LOG"; exit 1; fi
+                    grep -q 'get engine.run -> podman' "$LOG" || { echo "engine.run set/read-back broke"; cat "$LOG"; exit 1; }
+                    grep -q 'get engine.run with a leftover build key -> docker' "$LOG" || { echo "the leftover key was not inert"; cat "$LOG"; exit 1; }
+                    cat "$LOG"
+                    echo SETTINGS-RETIRED-OK
