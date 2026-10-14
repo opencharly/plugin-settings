@@ -96,9 +96,11 @@ check-settings-retired-build:
                     ${CHARLY_BIN} settings reset engine.run 2>&1
                     echo "== ARM 4: a leftover engine.build in config.yml is INERT (measured, #481 D-1)"
                     CFG="$(${CHARLY_BIN} settings path 2>/dev/null | tail -1)"
-                    ${CHARLY_BIN} settings set engine.run docker >/dev/null 2>&1
-                    printf 'engine:\n  build: podman\n' >> "$CFG"
-                    echo "get engine.run with a leftover build key -> $(${CHARLY_BIN} settings get engine.run 2>/dev/null | tail -1)"
+                    # The REAL leftover shape: ONE `engine:` mapping carrying the retired key beside
+                    # the live one. Appending a second `engine:` block would be a duplicate YAML key
+                    # and would fail the load for a reason that has nothing to do with this change.
+                    printf 'engine:\n  run: docker\n  build: podman\n' > "$CFG"
+                    echo "get engine.run with a leftover build key -> $(${CHARLY_BIN} settings get engine.run 2>&1 | tail -1)"
                     echo "== SETTINGS-RETIRED-OK"
                     }
                     if arms >"$LOG" 2>&1; then :; else rc=$?; cat "$LOG"; exit $rc; fi
