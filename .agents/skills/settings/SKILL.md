@@ -1,0 +1,98 @@
+---
+name: settings
+description: |-
+  Runtime configuration management for the charly CLI — `charly settings`, engine selection, bind address, storage paths, secret backend configuration.
+---
+
+# charly settings -- Runtime Configuration
+
+## Overview
+
+Manage charly's runtime configuration stored in `~/.config/charly/config.yml`. Controls engine selection, networking, storage paths, secret backend, and agent forwarding.
+
+`charly settings` is a **compiled-in COMMAND-class plugin** (`candy/plugin-settings`, `command:settings`) that OWNS the command AND the config subsystem: the get/set/list/reset/path subcommand grammar + output formatting live in `candy/plugin-settings/{command.go,provider.go,plugin.go}`, and the runtime-config file I/O lives in `candy/plugin-settings/config.go` — `GetConfigValue` / `SetConfigValue` / `ListConfigValues` / `ResetConfigValue` / `resolveSettingsGet`, over `spec/hostenv.RuntimeConfigPath()` for `~/.config/charly/config.yml` (the former `charly/runtime_config.go` is DELETED, K-wave 2). `resolveSettingsGet` resolves the `get` special-cases in-package: `engine.*` via `ResolveRuntime`, and `secret_backend` / `vnc.password.*` via `InvokeProvider(verb:credential)` — there is no `"settings"` HostBuild seam (the former `charly/host_build_settings.go` is DELETED, K-wave 2). `settings` is compiled into the `charly` binary (`charly/charly.yml` `compiled_plugins:`) so its `Invoke(OpRun)` can serve `verb:credential` over the in-proc reverse channel; the out-of-process path has no reverse channel and errors. There is no hidden core-command forward.
+
+## Quick Reference
+
+| Action | Command | Description |
+|--------|---------|-------------|
+| Get a setting | `charly settings get <key>` | Show current value |
+| Set a setting | `charly settings set <key> <value>` | Update a setting |
+| List all | `charly settings list` | Show all settings with values |
+| Reset to default | `charly settings reset <key>` | Remove override, use default |
+| Config path | `charly settings path` | Print path to config.yml |
+| Migrate secrets | `charly secrets migrate-secrets [--dry-run]` | Move plaintext credentials to keyring (externalized to candy/plugin-secrets) |
+
+## Key Settings
+
+| Key | Default | Env Var | Description |
+|-----|---------|---------|-------------|
+| `engine.run` | `auto` | `CHARLY_RUN_ENGINE` | Run engine (`auto`, `podman`, `docker`, `containerd`). `auto` detects podman, then docker; `containerd` is opt-in and never auto-detected. `nerdctl` is containerd's CLI binary, not an engine value. |
+| `run_mode` | `auto` | `CHARLY_RUN_MODE` | Deployment mode (`auto`, `quadlet`, `systemd-unit`, `direct`). `quadlet` is podman's, `systemd-unit` wraps the engine CLI (containerd's `nerdctl`), `direct` is an ephemeral argv launch. |
+| `bind_address` | `127.0.0.1` | `CHARLY_BIND_ADDRESS` | Default bind address for ports |
+| `encrypted_storage_path` | `~/.local/share/charly/encrypted` | `CHARLY_ENCRYPTED_STORAGE_PATH` | Base path for gocryptfs volumes |
+| `volumes_path` | `~/.local/share/charly/volumes` | `CHARLY_VOLUMES_PATH` | Base path for bind-mounted volumes |
+| `secret_backend` | `auto` | `CHARLY_SECRET_BACKEND` | Credential backend (auto/keyring/config) |
+| `keyring_collection_label` | *(empty)* | `CHARLY_KEYRING_COLLECTION_LABEL` | Preferred Secret Service collection label. Empty = iterate naturally (default alias → listing order). Set to pin charly to a specific collection in multi-database setups (e.g. KeePassXC with multiple open databases). See `/charly-automation:enc` for the full iteration order. |
+| `forward_gpg_agent` | `true` | `CHARLY_FORWARD_GPG_AGENT` | Forward GPG agent into containers |
+| `forward_ssh_agent` | `true` | `CHARLY_FORWARD_SSH_AGENT` | Forward SSH agent into containers |
+| `hosts.<alias>` | *(none)* | — | SSH target for `charly --host <alias>` remote execution. Free-form: `host`, `user@host`, `user@host:port`. Consulted by the top-level `--host` flag to re-exec `charly` commands on another machine over SSH. See `/charly-core:ssh`. |
+
+## Usage
+
+### Engine Selection
+
+`engine.run` selects the engine that RUNS containers; the image builder is BuildKit and is
+not selectable. The closed engine vocabulary is `podman`, `docker`, and `containerd`.
+`auto` (the default) resolves it by detecting podman, then docker; `containerd` is opt-in
+and is never auto-detected. `containerd` is driven through the `nerdctl` CLI, so `nerdctl`
+is the binary, not an engine value.
+
+```bash
+# Which engine RUNS containers (the builder is BuildKit, and is not selectable)
+charly settings set engine.run podman
+
+# containerd: opt-in, never auto-detected (driven through the nerdctl CLI)
+charly settings set engine.run containerd
+
+# Check current engine
+charly settings get engine.run
+```
+
+### Storage Paths
+
+```bash
+# Change volume storage to NAS
+charly settings set volumes_path /mnt/nas/charly-volumes
+
+# Change encrypted storage location
+charly settings set encrypted_storage_path /mnt/encrypted/charly
+```
+
+### Secret Backend
+
+```bash
+# Force the Secret Service keyring backend (incl. KeePassXC via FdoSecrets)
+charly settings set secret_backend keyring
+
+# Force the config-file plaintext fallback (headless hosts)
+charly settings set secret_backend config
+
+# Migrate plaintext secrets from config.yml to the keyring (the credential
+# store + secrets CLI are externalized into candy/plugin-secrets)
+charly secrets migrate-secrets
+
+# Preview migration without changes
+charly secrets migrate-secrets --dry-run
+```
+
+### Resolution Chain
+
+Settings resolve in this order: environment variable > config.yml > default value.
+
+## Cross-References
+
+- `/charly-core:charly-config` -- deployment configuration (uses settings)
+- `/charly-build:secrets` -- credential management
+- `/charly-core:charly-doctor` -- diagnose settings and secret storage health
+- `/charly-automation:enc` -- encrypted volume paths

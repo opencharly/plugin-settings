@@ -52,3 +52,15 @@ plugin-settings:
               context:
                 - build
               command: "true"
+
+# The `settings` skill, authored beside the command it documents.
+# ROUTING-ONLY: `name`/`family`/`owner` and NO `triggers:` — this skill carried no
+# triggers in the carrier either, so it generates no DISPATCHER.md row and this move
+# adds none and removes none. The prose is `.agents/skills/settings/SKILL.md` at this
+# repo's root, never an inline `description:`/`content:` (an inline body that disagrees
+# with its file is a hard error in the marketplace generator).
+settings-skill:
+    skill:
+        name: settings
+        family: build
+        owner: plugin-settings
