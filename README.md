@@ -26,7 +26,7 @@ Compose the plugin candy in a project, then use the CLI:
 
 ```bash
 charly settings list
-charly settings set engine.podman
+charly settings set engine.run podman
 charly settings get secret_backend
 charly settings path
 ```

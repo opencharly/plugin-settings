@@ -12,6 +12,7 @@ import (
 
 	"github.com/opencharly/sdk"
 	"github.com/opencharly/sdk/kit"
+	"github.com/opencharly/spec/container"
 )
 
 // config.go — the config-subsystem (GetConfigValue/SetConfigValue/ResetConfigValue/
@@ -282,7 +283,11 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 	case "engine.run":
 		if value != "auto" {
 			if err := kit.ValidateEngine(value, key); err != nil {
-				return fmt.Errorf("%s must be \"auto\", \"docker\", or \"podman\", got %q", key, value)
+				// `auto` is a resolution SELECTOR, not an engine word, so it is not a
+				// member of spec.EngineNames; name it explicitly and let the contract
+				// module supply the rest. A literal list here would drift the moment
+				// the vocabulary changes (it already did: nerdctl -> containerd).
+				return fmt.Errorf("%s must be \"auto\" or one of %s, got %q", key, strings.Join(container.EngineNames(), ", "), value)
 			}
 		}
 	case "engine.rootful":
