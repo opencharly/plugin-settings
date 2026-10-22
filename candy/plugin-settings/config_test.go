@@ -4,9 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/opencharly/sdk/kit"
+	"github.com/opencharly/spec/container"
 	"github.com/opencharly/spec/hostenv"
 )
 
@@ -26,9 +28,34 @@ func TestSetConfigValue_Validates(t *testing.T) {
 	defer func() { hostenv.RuntimeConfigPath = orig }()
 	hostenv.RuntimeConfigPath = func() (string, error) { return configPath, nil }
 
-	err := SetConfigValue(testCtx, nil, "engine.run", "containerd")
+	// engine.run's vocabulary is spec's #EngineName (podman | docker | containerd),
+	// emitted as spec.EngineNames, plus the `auto` resolution selector. BOTH arms are
+	// pinned: `containerd` is ACCEPTED and the retired `nerdctl` word is REJECTED.
+	// Checking acceptance alone would pass on the pre-cutover tree under the old
+	// spelling, so the pair is what makes this test able to fail without the change.
+	if err := SetConfigValue(testCtx, nil, "engine.run", "containerd"); err != nil {
+		t.Errorf("engine.run must accept containerd (spec #EngineName): %v", err)
+	}
+	if val, err := GetConfigValue(testCtx, nil, "engine.run"); err != nil || val != "containerd" {
+		t.Errorf("after set, engine.run = (%q, %v), want (\"containerd\", nil)", val, err)
+	}
+
+	err := SetConfigValue(testCtx, nil, "engine.run", "nerdctl")
 	if err == nil {
-		t.Error("expected error for invalid engine value")
+		t.Fatal("engine.run must reject the retired nerdctl word — it is the CLI binary, not an engine name")
+	}
+	// The rejection names the CURRENT vocabulary: `auto` plus every member of
+	// spec.EngineNames, read from the contract module rather than transcribed here.
+	for _, want := range append([]string{"auto"}, container.EngineNames()...) {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the rejection must name %q (current vocabulary):\n%s", want, err)
+		}
+	}
+	// ...and must not ADVERTISE the retired word. Its one permitted occurrence is
+	// the rejected value itself (`got "nerdctl"`); a second occurrence means the
+	// offered list still carries it.
+	if got := strings.Count(err.Error(), "nerdctl"); got != 1 {
+		t.Errorf("nerdctl must appear only as the rejected value, got %d occurrences:\n%s", got, err)
 	}
 
 	err = SetConfigValue(testCtx, nil, "run_mode", "swarm")
