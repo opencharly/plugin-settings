@@ -13,6 +13,7 @@ import (
 	"github.com/opencharly/sdk"
 	"github.com/opencharly/sdk/kit"
 	"github.com/opencharly/spec/container"
+	"github.com/opencharly/spec/spec"
 )
 
 // config.go — the config-subsystem (GetConfigValue/SetConfigValue/ResetConfigValue/
@@ -168,6 +169,30 @@ func retiredSettingError(key string) error {
 	return nil
 }
 
+// settingKeyVocabulary is the ONE valid-key hint every verb reports. The three
+// verbs used to carry a hand-maintained copy each, and they had already drifted
+// (one omitted hosts.<alias>, another keyring_collection_label), so the
+// vocabulary is stated once here and every unknown-key answer reads it.
+const settingKeyVocabulary = "engine.run, engine.rootful, containerd.namespace, run_mode, auto_enable, bind_address, encrypted_storage_path, volumes_path, secret_backend, keyring_collection_label, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>"
+
+// unknownConfigKeyError is the ONE unknown-key answer. It names the real
+// vocabulary, so a typo is correctable without reading the source.
+func unknownConfigKeyError(key string) error {
+	return fmt.Errorf("unknown config key %q (valid: %s)", key, settingKeyVocabulary)
+}
+
+// containerdNamespaceDefault returns the built-in containerd namespace from the
+// contract module's engine capability facts. It is DERIVED, never a literal: the
+// schema owns the default, and a change there reaches this layer without an edit.
+func containerdNamespaceDefault() string {
+	for _, name := range container.EngineNames() {
+		if c, ok := kit.EngineCapabilityFor(name); ok && c.Namespace != "" {
+			return c.Namespace
+		}
+	}
+	return ""
+}
+
 // GetConfigValue returns the value for a dot-notation key from the config file. Direct port of
 // charly/runtime_config_values.go's GetConfigValue.
 //
@@ -186,6 +211,8 @@ func GetConfigValue(ctx context.Context, exec *sdk.Executor, key string) (string
 		return cfg.Engine.Run, nil
 	case "engine.rootful":
 		return cfg.Engine.Rootful, nil
+	case "containerd.namespace":
+		return cfg.Containerd.Namespace, nil
 	case "run_mode":
 		return cfg.RunMode, nil
 	case "auto_enable":
@@ -266,7 +293,7 @@ func GetConfigValue(ctx context.Context, exec *sdk.Executor, key string) (string
 			}
 			return val, nil
 		}
-		return "", fmt.Errorf("unknown config key %q (valid: engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, volumes_path, secret_backend, keyring_collection_label, forward_gpg_agent, forward_ssh_agent, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
+		return "", unknownConfigKeyError(key)
 	}
 }
 
@@ -291,8 +318,15 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 			}
 		}
 	case "engine.rootful":
-		if value != "auto" && value != "machine" && value != "sudo" && value != "native" {
-			return fmt.Errorf("engine.rootful must be \"auto\", \"machine\", \"sudo\", or \"native\", got %q", value)
+		if !slices.Contains(spec.RootfulModes, value) {
+			return fmt.Errorf("%s must be one of %s, got %q", key, strings.Join(spec.RootfulModes, ", "), value)
+		}
+	case "containerd.namespace":
+		// A containerd namespace is an operator-chosen identifier, not a member of
+		// a closed vocabulary: every non-empty value is accepted, and `reset`
+		// returns to the engine capability's built-in default.
+		if value == "" {
+			return fmt.Errorf("containerd.namespace must be a non-empty namespace name")
 		}
 	case "run_mode":
 		if err := kit.ValidateRunMode(value); err != nil {
@@ -326,8 +360,8 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 			return fmt.Errorf("forward_ssh_agent must be \"true\" or \"false\", got %q", value)
 		}
 	case "vm.backend":
-		if value != "auto" && value != "libvirt" && value != "qemu" {
-			return fmt.Errorf("vm.backend must be \"auto\", \"libvirt\", or \"qemu\", got %q", value)
+		if value != "auto" && !slices.Contains(spec.VmBackends, value) {
+			return fmt.Errorf("vm.backend must be \"auto\" or one of %s, got %q", strings.Join(spec.VmBackends, ", "), value)
 		}
 	case "vm.disk_size":
 		// Any non-empty size string is valid (e.g. "10 GiB", "20G")
@@ -362,7 +396,7 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 			// VNC passwords are free-form strings, no validation needed.
 			break
 		}
-		return fmt.Errorf("unknown config key %q (valid: engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
+		return unknownConfigKeyError(key)
 	}
 
 	cfg, err := kit.LoadRuntimeConfig()
@@ -375,6 +409,8 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 		cfg.Engine.Run = value
 	case "engine.rootful":
 		cfg.Engine.Rootful = value
+	case "containerd.namespace":
+		cfg.Containerd.Namespace = value
 	case "run_mode":
 		cfg.RunMode = value
 	case "auto_enable":
@@ -458,6 +494,8 @@ func ResetConfigValue(ctx context.Context, exec *sdk.Executor, key string) error
 		cfg.Engine.Run = ""
 	case "engine.rootful":
 		cfg.Engine.Rootful = ""
+	case "containerd.namespace":
+		cfg.Containerd.Namespace = ""
 	case "run_mode":
 		cfg.RunMode = ""
 	case "auto_enable":
@@ -506,7 +544,7 @@ func ResetConfigValue(ctx context.Context, exec *sdk.Executor, key string) error
 			name := after
 			return credentialDelete(ctx, exec, credServiceVNC, name)
 		}
-		return fmt.Errorf("unknown config key %q (valid: engine.run, engine.rootful, run_mode, auto_enable, bind_address, encrypted_storage_path, secret_backend, forward_gpg_agent, forward_ssh_agent, hosts.<alias>, vm.backend, vm.disk_size, vm.root_size, vm.ram, vm.cpus, vm.rootfs, vm.transport, vm.image_dir, vnc.password.<image>)", key)
+		return unknownConfigKeyError(key)
 	}
 
 	return kit.SaveRuntimeConfig(cfg)
@@ -611,9 +649,19 @@ func ListConfigValues() ([]configKeySource, error) {
 		return configKeySource{Key: "vm.cpus", Value: "2", Source: "default"}
 	}
 
+	// containerd.namespace has NO env mirror: its resolution levels are the
+	// settings file and the engine capability's built-in default.
+	containerdNamespaceEntry := func() configKeySource {
+		if cfg.Containerd.Namespace != "" {
+			return configKeySource{Key: "containerd.namespace", Value: cfg.Containerd.Namespace, Source: "config"}
+		}
+		return configKeySource{Key: "containerd.namespace", Value: containerdNamespaceDefault(), Source: "default"}
+	}
+
 	out := []configKeySource{
 		resolve("engine.run", "CHARLY_RUN_ENGINE", cfg.Engine.Run, "auto"),
 		resolve("engine.rootful", "CHARLY_ENGINE_ROOTFUL", cfg.Engine.Rootful, "auto"),
+		containerdNamespaceEntry(),
 		resolve("run_mode", "CHARLY_RUN_MODE", cfg.RunMode, "auto"),
 		autoEnableEntry(),
 		resolve("bind_address", "CHARLY_BIND_ADDRESS", cfg.BindAddress, "127.0.0.1"),
@@ -686,5 +734,5 @@ func resolveSettingsGet(ctx context.Context, exec *sdk.Executor, key string) (st
 	if strings.HasPrefix(key, "hosts.") || strings.HasPrefix(key, "vnc.password.") {
 		return GetConfigValue(ctx, exec, key)
 	}
-	return "", fmt.Errorf("unknown config key %q (run 'charly settings list' to see valid keys)", key)
+	return "", unknownConfigKeyError(key)
 }
