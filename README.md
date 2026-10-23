@@ -42,8 +42,9 @@ charly settings path
 ## Related
 
 - Owning skill: `/charly-build:settings` — the runtime configuration surface.
-  This candy carries no `skill:` entity of its own; the gap is tracked in
-  [opencharly/opencharly#291](https://github.com/opencharly/opencharly/issues/291).
+  The skill is authored beside the command it documents at
+  `.agents/skills/settings/SKILL.md` (carried by the `settings-skill` entity in
+  `charly.yml`), so the prose and the code it describes move together.
 - `/charly-build:secrets` — the credential store `settings` reaches for
   `secret_backend`.
 - `/charly-internals:plugin` — the plugin/provider model.
