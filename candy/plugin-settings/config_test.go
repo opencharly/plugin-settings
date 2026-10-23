@@ -585,3 +585,97 @@ func TestVmBackend_AcceptsSpecVocabulary(t *testing.T) {
 		}
 	}
 }
+
+// TestEngineRootful_AcceptsSpecVocabulary pins the schema-owned rootful
+// vocabulary. Every member must be accepted — INCLUDING `auto`, which is the
+// documented default and IS a member of spec.RootfulModes (unlike vm.backend,
+// whose `auto` is a selector outside spec.VmBackends). The rejection must name
+// the list as the contract spells it, which is the control: the pre-change
+// hand-written message quoted the words individually ("auto", "machine", …) and
+// therefore fails the joined-list assertion.
+func TestEngineRootful_AcceptsSpecVocabulary(t *testing.T) {
+	withRetiredConfig(t, "")
+
+	for _, mode := range spec.RootfulModes {
+		if err := SetConfigValue(testCtx, nil, "engine.rootful", mode); err != nil {
+			t.Fatalf("engine.rootful must accept %q (spec.RootfulModes): %v", mode, err)
+		}
+		if got, err := GetConfigValue(testCtx, nil, "engine.rootful"); err != nil || got != mode {
+			t.Fatalf("engine.rootful = (%q, %v), want (%q, nil)", got, err, mode)
+		}
+	}
+
+	if err := SetConfigValue(testCtx, nil, "engine.rootful", "auto"); err != nil {
+		t.Fatalf("engine.rootful must accept the documented default %q: %v", "auto", err)
+	}
+
+	err := SetConfigValue(testCtx, nil, "engine.rootful", "rootless")
+	if err == nil {
+		t.Fatal("engine.rootful must reject a word outside spec.RootfulModes")
+	}
+	if want := strings.Join(spec.RootfulModes, ", "); !strings.Contains(err.Error(), want) {
+		t.Errorf("the rejection must carry the contract's list %q:\n%s", want, err)
+	}
+}
+
+// TestSettingKeyVocabularyMatchesImplementation ties the ONE advertised hint to
+// the implemented keys: every concrete key the hint lists round-trips through
+// set/get/reset, and the placeholder keys are reachable through their own
+// prefix. A key added to a switch but omitted from the hint (or advertised but
+// not implemented) fails here — the drift class the hint centralisation exists
+// to close.
+func TestSettingKeyVocabularyMatchesImplementation(t *testing.T) {
+	withRetiredConfig(t, "")
+
+	// Read the hint through the PUBLIC verb the user sees, not the constant, so
+	// this test also compiles and RUNS against the pre-change tree — the control
+	// must fail on behaviour, never on a missing symbol.
+	_, hintErr := GetConfigValue(testCtx, nil, "definitely.not.a.key")
+	if hintErr == nil {
+		t.Fatal("an unknown key must be rejected")
+	}
+	hint := hintErr.Error()
+
+	samples := map[string]string{
+		"engine.run":               "podman",
+		"engine.rootful":           "auto",
+		"containerd.namespace":     "default",
+		"run_mode":                 "quadlet",
+		"auto_enable":              "true",
+		"bind_address":             "127.0.0.1",
+		"encrypted_storage_path":   "/tmp/enc",
+		"volumes_path":             "/tmp/vol",
+		"secret_backend":           "config",
+		"keyring_collection_label": "main",
+		"forward_gpg_agent":        "true",
+		"forward_ssh_agent":        "true",
+		"vm.backend":               "auto",
+		"vm.disk_size":             "10 GiB",
+		"vm.root_size":             "10G",
+		"vm.ram":                   "4G",
+		"vm.cpus":                  "2",
+		"vm.rootfs":                "ext4",
+		"vm.transport":             "registry",
+		"vm.image_dir":             "/srv/vm-images",
+		"hosts.<alias>":            "user@host",
+	}
+	for advertised, sample := range samples {
+		key := advertised
+		if advertised == "hosts.<alias>" {
+			key = "hosts.probe"
+		}
+		if err := SetConfigValue(testCtx, nil, key, sample); err != nil {
+			t.Errorf("%s is advertised but set rejects it: %v", advertised, err)
+			continue
+		}
+		if got, err := GetConfigValue(testCtx, nil, key); err != nil || got != sample {
+			t.Errorf("%s round-trip = (%q, %v), want (%q, nil)", advertised, got, err, sample)
+		}
+		if err := ResetConfigValue(testCtx, nil, key); err != nil {
+			t.Errorf("%s is advertised but reset rejects it: %v", advertised, err)
+		}
+		if !strings.Contains(hint, advertised) {
+			t.Errorf("%s is implemented but absent from the advertised hint", advertised)
+		}
+	}
+}

@@ -184,6 +184,11 @@ func unknownConfigKeyError(key string) error {
 // containerdNamespaceDefault returns the built-in containerd namespace from the
 // contract module's engine capability facts. It is DERIVED, never a literal: the
 // schema owns the default, and a change there reaches this layer without an edit.
+//
+// The scan is deliberate. The namespace fact is carried by the containerd
+// capability row (no other row declares one), and this layer may not name an
+// engine word — so reading whichever row declares a namespace finds the default
+// without hardcoding either the engine word or the namespace value.
 func containerdNamespaceDefault() string {
 	for _, name := range container.EngineNames() {
 		if c, ok := kit.EngineCapabilityFor(name); ok && c.Namespace != "" {
@@ -359,6 +364,9 @@ func SetConfigValue(ctx context.Context, exec *sdk.Executor, key, value string) 
 		if value != "true" && value != "false" {
 			return fmt.Errorf("forward_ssh_agent must be \"true\" or \"false\", got %q", value)
 		}
+	case "keyring_collection_label":
+		// Any label is valid; the empty string clears the preference and returns
+		// to the natural iteration order (the state `reset` produces).
 	case "vm.backend":
 		if value != "auto" && !slices.Contains(spec.VmBackends, value) {
 			return fmt.Errorf("vm.backend must be \"auto\" or one of %s, got %q", strings.Join(spec.VmBackends, ", "), value)
